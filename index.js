@@ -105,12 +105,12 @@ UseePay.prototype.execute = async function ({ method = 'get', url, headers = {},
   }
 
   if (form) {
-    if (!form.sign) {
-      if (this.signType === 'MD5') {
-        form.sign = this._genMD5Sign(form)
-      } else {
-        form.sign = this._genRSASign(form)
-      }
+    form.signType = this.signType
+
+    if (this.signType === 'MD5') {
+      form.sign = this._genMD5Sign(form)
+    } else {
+      form.sign = this._genRSASign(form)
     }
 
     payload.form = form
