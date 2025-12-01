@@ -1,10 +1,3 @@
-import crypto from 'node:crypto'
-
-import request from 'lite-request'
-import { HttpsProxyAgent } from 'https-proxy-agent'
-import { SocksProxyAgent } from 'socks-proxy-agent'
-import NodeRSA from 'node-rsa'
-
 class UseePay {
   constructor (options = {}) {
     this.environment = options.environment || 'sandbox'
@@ -20,34 +13,10 @@ class UseePay {
     if (!this.signKey) {
       throw new TypeError('No signKey')
     }
-
-    const proxy = options.proxy
-    if (proxy) {
-      if (typeof proxy === 'string') {
-        if (proxy.startsWith('http://')) {
-          this.agent = new HttpsProxyAgent(proxy)
-        } else if (proxy.startsWith('socks://')) {
-          this.agent = new SocksProxyAgent(proxy)
-        }
-      } else if (typeof proxy === 'object') {
-        if (!['http', 'socks'].includes(proxy.protocol)) {
-          throw new TypeError('proxy.protocol must be one of ["http", "socks"]')
-        }
-        this.agent = (proxy.protocol === 'http')
-          ? new HttpsProxyAgent((proxy.username && proxy.password)
-            ? `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`
-            : `http://${proxy.host}:${proxy.port}`
-          )
-          : new SocksProxyAgent((proxy.username && proxy.password)
-            ? `socks://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`
-            : `socks://${proxy.host}:${proxy.port}`
-          )
-      }
-    }
   }
 
   // https://openapi-useepay.apifox.cn/doc-1987912#md5%E7%AD%BE%E5%90%8D%E7%94%9F%E6%88%90%E7%A4%BA%E4%BE%8B
-  _genMD5Sign (payload) {
+  async _genMD5Sign (payload) {
     const data = Object.keys(payload)
       .sort()
       .reduce((obj, key) => {
@@ -61,11 +30,11 @@ class UseePay {
       }
     })
     str = str + 'pkey=' + this.signKey
-    return crypto.createHash('md5').update(str).digest('hex')
+    return md5(str)
   }
 
   // https://openapi-useepay.apifox.cn/doc-1987912#rsa%E7%AD%BE%E5%90%8D%E7%94%9F%E6%88%90%E7%A4%BA%E4%BE%8B
-  _genRSASign (payload) {
+  async _genRSASign (payload) {
     const data = Object.keys(payload)
       .sort()
       .reduce((obj, key) => {
@@ -79,10 +48,23 @@ class UseePay {
       }
     })
     str = str.substr(0, str.length - 1)
-    return new NodeRSA(this.signKey, 'pkcs8-private').sign(
-      Buffer.from(str),
-      'base64'
+
+    const key = await importPrivateKey(this.signKey)
+    const encoder = new TextEncoder()
+    const dataBuffer = encoder.encode(str)
+
+    const signature = await crypto.subtle.sign(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      dataBuffer
     )
+
+    const bytes = new Uint8Array(signature)
+    let binary = ''
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    return btoa(binary)
   }
 
   _getURL (url) {
@@ -93,30 +75,67 @@ class UseePay {
   }
 
   async execute ({ method = 'GET', url, headers = {}, body }) {
-    const payload = {
+    const fetchOptions = {
       method,
-      url: this._getURL(url),
-      headers,
-      agent: this.agent,
-      json: true
+      headers: Object.assign({
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }, headers)
     }
 
     if (body) {
       body.signType = this.signType
 
       if (this.signType === 'MD5') {
-        body.sign = this._genMD5Sign(body)
+        body.sign = await this._genMD5Sign(body)
       } else {
-        body.sign = this._genRSASign(body)
+        body.sign = await this._genRSASign(body)
       }
 
-      payload.form = body
+      fetchOptions.body = new URLSearchParams(body)
     }
 
-    const response = await request(payload)
+    const response = await fetch(this._getURL(url), fetchOptions)
 
-    return response.data
+    const json = await response.json()
+
+    return json
   }
+}
+
+async function importPrivateKey (pem) {
+  const pemBody = pem
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\s+/g, '')
+
+  const binaryDerString = atob(pemBody)
+  const binaryDer = new Uint8Array(binaryDerString.length)
+  for (let i = 0; i < binaryDerString.length; i++) {
+    binaryDer[i] = binaryDerString.charCodeAt(i)
+  }
+
+  return crypto.subtle.importKey(
+    'pkcs8',
+    binaryDer,
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      hash: 'SHA-256'
+    },
+    false,
+    ['sign']
+  )
+}
+
+async function md5 (message) {
+  const encoder = new TextEncoder()
+  const buffer = encoder.encode(message)
+
+  const digest = await crypto.subtle.digest({ name: 'MD5' }, buffer)
+  const hash = Array.from(new Uint8Array(digest))
+    .map((x) => x.toString(16).padStart(2, '0'))
+    .join('')
+
+  return hash
 }
 
 export default UseePay

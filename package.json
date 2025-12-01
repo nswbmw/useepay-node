@@ -1,7 +1,7 @@
 {
   "name": "useepay",
   "description": "Useepay SDK for Node.js.",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
@@ -12,6 +12,12 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.cjs",
       "default": "./dist/esm/index.js"
+    },
+    "./worker": {
+      "types": "./types/worker.d.ts",
+      "import": "./dist/esm/worker.js",
+      "require": "./dist/cjs/worker.cjs",
+      "default": "./dist/esm/worker.js"
     }
   },
   "files": [
@@ -51,7 +57,6 @@
   "dependencies": {
     "https-proxy-agent": "7.0.6",
     "lite-request": "1.0.2",
-    "node-rsa": "1.1.1",
     "socks-proxy-agent": "8.0.5"
   }
 }
